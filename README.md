@@ -1,5 +1,6 @@
 # BasicSTISR
-BasicSR (Basic Scene Text Image Super Resolution) 是一个基于 PyTorch 的开源场景文本图像超分辨率工具箱.
+
+BasicSTISR (Basic Scene Text Image Super Resolution) 是一个基于 PyTorch 的开源场景文本图像超分辨率工具箱.
 
 ## Prepare Datasets
 
