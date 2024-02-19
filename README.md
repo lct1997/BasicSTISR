@@ -7,7 +7,7 @@ In this work, we use STISR datasets TextZoom and four STR benchmarks, i.e., ICDA
 
 All the datasets are `lmdb` format.  One can download these datasets from the this [link](https://drive.google.com/drive/folders/1uqr8WIEM2xRs-K6I9KxtOdjcSoDWqJNJ?usp=share_link). 
 ```
-./dataset/TextZoom/
+./datasets/TextZoom/
     --test
     --train1
     --train2
