@@ -1,0 +1,55 @@
+MODEL:
+
+
+TRAIN:
+  train_data_dir: [
+    'datasets/TextZoom/train1',
+    'datasets/TextZoom/train2',
+  ]
+  batch_size: 48
+  width: 128
+  height: 32
+  epochs: 300
+  cuda: True
+  ngpu: 1
+  workers: 8
+  resume: ''
+  ckpt_dir: ''
+  voc_type: 'all' #'digits lower upper all'
+  saveInterval: 400 # saveInterval >= valInterval
+  displayInterval: 50 #display loss
+  adadelta: False
+  lr: 0.001
+  adam: True
+  optimizer: "Adam"
+  beta1: 0.5
+  manualSeed: 1234
+  max_len: 100
+  keep_ratio: False
+  down_sample_scale: 2
+
+  VAL:
+    val_data_dir: [
+      'datasets/TextZoom/test/easy',
+      'datasets/TextZoom/test/medium',
+      'datasets/TextZoom/test/hard',
+    ]
+    n_vis: 10
+    vis_dir: 'demo'
+    valInterval: 400
+    rec_pretrained: 'pretrained/aster.pth.tar'
+    moran_pretrained: 'pretrained/moran.pth'
+    crnn_pretrained: 'pretrained/crnn.pth'
+
+TEST:
+  checkpoint: ''
+  test_data_dir: [
+  ]
+
+CONVERT:
+  image_dir:
+  lmdb_dir:
+  n_convert: 10
+
+
+
