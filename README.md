@@ -1,10 +1,10 @@
 # BasicSTISR
 
 BasicSTISR (Basic Scene Text Image Super Resolution) 是一个基于 PyTorch 的开源场景文本图像超分辨率工具箱.
-1. 具有详细的训练日志记录
-2. 相比之前的代码要更简洁
-3. 具有良好的可读性和易用性
-4. 正在改进...
+1. It has detailed training logging.
+2. It's more concise than the previous code.
+3. It has good readability and ease of use.
+
 ## Prepare Datasets
 
 In this work, we use STISR datasets TextZoom and four STR benchmarks, i.e., ICDAR2015, CUTE80, SVT and SVTP for model comparison. 
