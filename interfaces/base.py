@@ -348,7 +348,7 @@ class TextBase(object):
             if is_best:
                 torch.save(save_dict, os.path.join(ckpt_path, 'model_best' + '.pth'))
             else:
-                torch.save(save_dict, os.path.join(ckpt_path, 'checkpoint.pth'))
+                torch.save(save_dict, os.path.join(ckpt_path, 'model_latest.pth'))
 
         if is_best:
             if not recognizer is None:
@@ -368,7 +368,7 @@ class TextBase(object):
                     for i in range(len(recognizer)):
                         torch.save(recognizer[i].state_dict(), os.path.join(ckpt_path, 'recognizer_' + str(i) + '.pth'))
                 else:
-                    torch.save(recognizer.state_dict(), os.path.join(ckpt_path, 'recognizer.pth'))
+                    torch.save(recognizer.state_dict(), os.path.join(ckpt_path, 'recognizer_latest.pth'))
             if not global_model is None:
                 torch.save(global_model.state_dict(), os.path.join(ckpt_path, 'global_model.pth'))
 
@@ -398,7 +398,8 @@ class TextBase(object):
         for p in MORAN.parameters():
             p.requires_grad = False
         MORAN.eval()
-        return MORAN
+        aster_info = None
+        return MORAN,aster_info
 
     def parse_moran_data(self, imgs_input):
         batch_size = imgs_input.shape[0]

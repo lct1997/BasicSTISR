@@ -85,6 +85,9 @@ class TextSR(base.TextBase):
                 os.remove(file)
         self.results_recorder = SummaryWriter(tensorboard_dir)
         # ------- init text recognizer for eval here --------
+        aster, aster_info = self.CRNN_init()
+        aster.eval()
+
         test_bible = {}
         if self.args.test_model == "CRNN":
             crnn, aster_info = self.CRNN_init()
@@ -94,6 +97,7 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_crnn_data,
                 'string_process': get_string_crnn
             }
+            text_recognizer = crnn
         elif self.args.test_model == "ASTER":
             aster_real, aster_real_info = self.Aster_init() # init ASTER model
             aster_info = aster_real_info
@@ -102,9 +106,9 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_aster_data,
                 'string_process': get_string_aster
             }
-
+            text_recognizer = aster_real
         elif self.args.test_model == "MORAN":
-            moran = self.MORAN_init()
+            moran, aster_info = self.MORAN_init()
             if isinstance(moran, torch.nn.DataParallel):
                 moran.device_ids = [0]
             test_bible["MORAN"] = {
@@ -112,13 +116,13 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_moran_data,
                 'string_process': get_string_crnn
             }
-
+            text_recognizer = moran
         if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
             recognizer_path = os.path.join('experiments', self.args.arch, "recognizer_best.pth")  # 这个是训练过程中生成的模型
             if os.path.isfile(recognizer_path):
                 aster_student, aster_info = self.CRNN_init(recognizer_path=recognizer_path)
             else:
-                aster_student, aster_info = self.CRNN_init(recognizer_path=None)
+                aster_student, aster_info = self.CRNN_init()
             aster_student.train()
             for p in aster_student.parameters():
                 p.requires_grad = True
@@ -169,7 +173,7 @@ class TextSR(base.TextBase):
                     label_vecs_final = label_vecs.permute(1, 0, 2).unsqueeze(1).permute(0, 3, 1, 2)
                     # ------------------ 识别HR ------------------------------
                     aster_dict_hr = self.parse_crnn_data(images_hr[:, :3, :, :])
-                    label_vecs_logits_hr = crnn(aster_dict_hr)  #不需要训练
+                    label_vecs_logits_hr = aster(aster_dict_hr)  #不需要训练
                     label_vecs_hr = torch.nn.functional.softmax(label_vecs_logits_hr, -1).detach()
                 """ 
                 网络输入与输出 
@@ -234,7 +238,7 @@ class TextSR(base.TextBase):
                                 val_loader,
                                 image_crit,
                                 iters,
-                                [test_bible[self.args.test_model], aster_student, crnn],
+                                [test_bible[self.args.test_model], aster_student, aster],
                                 aster_info,
                                 data_name
                             )
@@ -242,7 +246,7 @@ class TextSR(base.TextBase):
                                 p.requires_grad = True
                             aster_student.train()
                         else:
-                            aster_student = crnn
+                            # text_recognizer = crnn
                             metrics_dict = self.eval(
                                 model_list,
                                 val_loader,
@@ -367,7 +371,7 @@ class TextSR(base.TextBase):
              # ----------------------- 该部分是 tatt 和 tpgsr用到的文本先验生成器 ----------------------------
             if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
                 aster_lr = self.parse_crnn_data(images_lr[:, :3, :, :])
-                aster_crnn_lr = aster[1](aster_lr)
+                aster_crnn_lr = aster[1](aster_lr) #用学习过的识别器来进行先验生成，0==>可学习，1==>不学习
                 label_vecs = torch.nn.functional.softmax(aster_crnn_lr, -1)  #[26,48,37] ==> [26,48,37]
                 label_vecs_final = label_vecs.permute(1, 0, 2).unsqueeze(1).permute(0, 3, 1, 2) #[48,37,1,26]
                 ret_dict = self.model_inference(images_lr, model_list, label_vecs_final) # get SR
@@ -585,7 +589,6 @@ class TextSR(base.TextBase):
         return metric_dict
 
 
-
     def test(self):
         total_acc = {}
         val_dataset_list, val_loader_list = self.get_val_data()
@@ -594,6 +597,8 @@ class TextSR(base.TextBase):
         model_list = [model]
         logging.info('Using text recognizer {}'.format(self.args.test_model))
         test_bible = {}
+
+        aster, aster_info = self.CRNN_init()
         aster_info = None
         if self.args.test_model == "CRNN":
             crnn, aster_info = self.CRNN_init()
@@ -611,10 +616,8 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_aster_data,
                 'string_process': get_string_aster
             }
-
         elif self.args.test_model == "MORAN":
-            moran = self.MORAN_init()
-            aster_info = None
+            moran, aster_info = self.MORAN_init()
             if isinstance(moran, torch.nn.DataParallel):
                 moran.device_ids = [0]
             test_bible["MORAN"] = {
@@ -649,7 +652,7 @@ class TextSR(base.TextBase):
                     val_loader,
                     image_crit,
                     0,
-                    [test_bible[self.args.test_model], aster_student, crnn],
+                    [test_bible[self.args.test_model], aster_student, aster],
                     aster_info,
                     data_name
                 )

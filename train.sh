@@ -1,7 +1,7 @@
-python main.py  --arch="srcnn" --display
-python main.py  --arch="srres" --display
-python main.py  --arch="tsrn" --display
-python main.py  --arch="tg"   --display
-python main.py  --arch="tpgsr" --display
-python main.py  --arch="tbsrn" --display
-python main.py  --arch="tatt"  --display
+python main.py  --arch="srcnn" --test_model="MORAN" --display
+python main.py  --arch="srres" --test_model="MORAN" --display
+python main.py  --arch="tsrn"  --test_model="MORAN" --display
+python main.py  --arch="tg"    --test_model="MORAN" --display
+python main.py  --arch="tpgsr" --test_model="MORAN" --display
+python main.py  --arch="tbsrn" --test_model="MORAN" --display
+python main.py  --arch="tatt"  --test_model="MORAN" --display

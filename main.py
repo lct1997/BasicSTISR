@@ -37,6 +37,9 @@ if __name__ == '__main__':
     config = EasyDict(config)
     config.TRAIN.lr = args.learning_rate
     parser_TPG = argparse.ArgumentParser()
-    Logger.init(f'experiments/{args.arch}', f'{args.arch.upper()}', 'train')
+    if args.test == True:
+        Logger.init(f'experiments/{args.arch}', f'{args.arch.upper()}', 'test')
+    else:
+        Logger.init(f'experiments/{args.arch}', f'{args.arch.upper()}', 'train')
     Logger.enable_file()
     main(config, args)
