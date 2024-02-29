@@ -18,29 +18,31 @@ class ImageLoss(nn.Module):
         self.loss_weight = loss_weight
 
     def forward(self, out_images, target_images):
-        loss = (self.loss_weight[0] * self.mse(out_images, target_images).mean(1).mean(1).mean(1) + \
-                self.loss_weight[1] * self.GPLoss(out_images[:, :3, :, :], target_images[:, :3, :, :]))
+        mse_loss = self.mse(out_images, target_images).mean(1).mean(1).mean(1)
+        gp_loss = self.GPLoss(out_images[:, :3, :, :], target_images[:, :3, :, :])
+        loss = self.loss_weight[0] * mse_loss + self.loss_weight[1] * gp_loss
         return loss
 
 class GradientPriorLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, ):
         super(GradientPriorLoss, self).__init__()
-        self.func = nn.L1Loss()
+        self.func = nn.L1Loss(reduce=False)
 
     def forward(self, out_images, target_images):
         map_out = self.gradient_map(out_images)
         map_target = self.gradient_map(target_images)
-        return self.func(map_out, map_target)
+
+        g_loss = self.func(map_out, map_target)
+
+        return g_loss.mean(1).mean(1).mean(1)
 
     @staticmethod
     def gradient_map(x):
-        _, _, h_x, w_x = x.size()
-
-        r = F.pad(x, (0, 1, 0, 0))[:, :, :, 1:] 
+        batch_size, channel, h_x, w_x = x.size()
+        r = F.pad(x, (0, 1, 0, 0))[:, :, :, 1:]
         l = F.pad(x, (1, 0, 0, 0))[:, :, :, :w_x]
         t = F.pad(x, (0, 0, 1, 0))[:, :, :h_x, :]
         b = F.pad(x, (0, 0, 0, 1))[:, :, 1:, :]
-
         xgrad = torch.pow(torch.pow((r - l) * 0.5, 2) + torch.pow((t - b) * 0.5, 2)+1e-6, 0.5)
         return xgrad
 

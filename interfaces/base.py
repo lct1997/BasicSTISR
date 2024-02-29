@@ -214,7 +214,7 @@ class TextBase(object):
                                betas=(cfg.beta1, 0.999))
         return optimizer
 
-    def optimizer_init(self, model, recognizer=None):
+    def optimizer_init_t(self, model, recognizer=None):
         cfg = self.config.TRAIN
         if not recognizer is None:
             if type(recognizer) == list:

@@ -51,7 +51,7 @@ class TextSR(base.TextBase):
         images_sr = []
         before = time.time()
         if text_emb is not None:  # ["tatt", "tbsrn", "tpgsr"]有文本先验和mask
-            output = model_list[0](images_lr, text_emb)
+            output = model_list[0](images_lr, text_emb.detach())
         elif self.args.arch in ["tg"]: # 没有mask
             output = model_list[0](images_lr[:,:3,:,:])
         else:
@@ -97,7 +97,6 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_crnn_data,
                 'string_process': get_string_crnn
             }
-            text_recognizer = crnn
         elif self.args.test_model == "ASTER":
             aster_real, aster_real_info = self.Aster_init() # init ASTER model
             aster_info = aster_real_info
@@ -106,7 +105,6 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_aster_data,
                 'string_process': get_string_aster
             }
-            text_recognizer = aster_real
         elif self.args.test_model == "MORAN":
             moran, aster_info = self.MORAN_init()
             if isinstance(moran, torch.nn.DataParallel):
@@ -116,18 +114,14 @@ class TextSR(base.TextBase):
                 'data_in_fn': self.parse_moran_data,
                 'string_process': get_string_crnn
             }
-            text_recognizer = moran
         if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
             recognizer_path = os.path.join('experiments', self.args.arch, "recognizer_best.pth")  # 这个是训练过程中生成的模型
             if os.path.isfile(recognizer_path):
-                aster_student, aster_info = self.CRNN_init(recognizer_path=recognizer_path)
+                aster_student, aster_stu_info = self.CRNN_init(recognizer_path=recognizer_path)
             else:
-                aster_student, aster_info = self.CRNN_init()
+                aster_student, aster_stu_info = self.CRNN_init()
             aster_student.train()
-            for p in aster_student.parameters():
-                p.requires_grad = True
-        if self.args.arch in ["tatt", "tpgsr","tbsrn"]:
-            optimizer_G = self.optimizer_init(model_list[0], aster_student)
+            optimizer_G = self.optimizer_init_t(model_list[0], recognizer=aster_student)
         else:
             optimizer_G = self.optimizer_init(model_list[0])
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer_G, 400,0.5)
@@ -141,6 +135,7 @@ class TextSR(base.TextBase):
         best_acc = 0
         converge_list = []
         log_path = os.path.join('experiments', self.args.arch, "eval.csv")
+
         for model in model_list:
             model.train()
 
@@ -167,7 +162,9 @@ class TextSR(base.TextBase):
                     images_hr = torch_rotate_img(images_hr, arc, rand_offs)
                     images_lr_ret = torch_rotate_img(images_lr.clone(), -arc, rand_offs)
                     # ------------------- 识别LR -----------------------------
-                    aster_dict_lr = self.parse_crnn_data(images_lr[:, :3, :, :])
+                    cascade_images = images_lr
+                    cascade_images = cascade_images.detach()
+                    aster_dict_lr = self.parse_crnn_data(cascade_images[:, :3, :, :])
                     label_vecs_logits = aster_student(aster_dict_lr)  #需要训练的识别网络
                     label_vecs = torch.nn.functional.softmax(label_vecs_logits, -1)
                     label_vecs_final = label_vecs.permute(1, 0, 2).unsqueeze(1).permute(0, 3, 1, 2)
@@ -186,14 +183,14 @@ class TextSR(base.TextBase):
                     cascade_images = model_list[0](images_lr[:,:3,:,:])
                     loss, mse_loss, attention_loss, recognition_loss = image_crit(cascade_images[:,:3,:,:], images_hr[:,:3,:,:], label_strs)
                 elif self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
-                    cascade_images = model_list[0](images_lr, label_vecs_final.detach())
-                    loss_tp = sem_loss(label_vecs.detach(), label_vecs_hr.detach())   # TP损失：LR和HR的识别结果损失
-                    loss = image_crit(cascade_images, images_hr)   # L2损失：SR和HR的图像损失
+                    cascade_images = model_list[0](cascade_images, label_vecs_final.detach())
+                    loss_tp = sem_loss(label_vecs, label_vecs_hr)   # TP损失：LR和HR的识别结果损失
+                    loss = image_crit(cascade_images, images_hr)  # L2损失：SR和HR的图像损失
                     if self.args.arch == "tatt":
                         """ TPGSR没有这个损失 """
                         cascade_images_sr_ret = model_list[0](images_lr_ret, label_vecs_final.detach())  # 获得旋转后的SR
                         cascade_images_ret = torch_rotate_img(cascade_images_sr_ret, arc, rand_offs)  # 再转回来
-                        loss_tsc = (1 - tri_ssim(cascade_images_ret, cascade_images, images_hr)) * 0.1  #TSC损失
+                        loss_tsc = (1 - tri_ssim(cascade_images_ret, cascade_images, images_hr).mean()) * 0.1  #TSC损失
                         loss += loss_tsc
                     loss += loss_tp
                 loss_img_each  =  loss.mean() * 100  # 总损失
@@ -229,6 +226,7 @@ class TextSR(base.TextBase):
                             for p in model.parameters():
                                 p.requires_grad = False
                         if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
+                            """ 验证时不求导 """
                             aster_student.eval()
                             for p in aster_student.parameters():
                                 p.requires_grad = False
@@ -258,7 +256,10 @@ class TextSR(base.TextBase):
                             )
                         psnr_dict[data_name]=metrics_dict['psnr_avg']
                         ssim_dict[data_name]=metrics_dict['ssim_avg']
-
+                        """ 验证完成后进行求导 """
+                        for p in aster_student.parameters():
+                            p.requires_grad = True
+                        aster_student.train()
                         for model in model_list:
                             for p in model.parameters():
                                 p.requires_grad = True
@@ -370,11 +371,12 @@ class TextSR(base.TextBase):
 
              # ----------------------- 该部分是 tatt 和 tpgsr用到的文本先验生成器 ----------------------------
             if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
-                aster_lr = self.parse_crnn_data(images_lr[:, :3, :, :])
-                aster_crnn_lr = aster[1](aster_lr) #用学习过的识别器来进行先验生成，0==>可学习，1==>不学习
+                cascade_images = images_lr
+                aster_dict_lr = self.parse_crnn_data(cascade_images[:, :3, :, :])
+                aster_crnn_lr = aster[1](aster_dict_lr) #用学习过的识别器来进行先验生成，0==>可学习，1==>不学习
                 label_vecs = torch.nn.functional.softmax(aster_crnn_lr, -1)  #[26,48,37] ==> [26,48,37]
                 label_vecs_final = label_vecs.permute(1, 0, 2).unsqueeze(1).permute(0, 3, 1, 2) #[48,37,1,26]
-                ret_dict = self.model_inference(images_lr, model_list, label_vecs_final) # get SR
+                ret_dict = self.model_inference(cascade_images, model_list, label_vecs_final) # get SR
             else:
                 ret_dict = self.model_inference(images_lr, model_list)
             sr_infer_time += ret_dict["duration"]
