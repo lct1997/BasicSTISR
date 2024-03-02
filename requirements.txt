@@ -1,0 +1,9 @@
+easydict
+tensorboardX
+IPython
+matplotlib
+imgaug
+ptflops
+editdistance
+lpips
+colour
