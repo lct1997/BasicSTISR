@@ -14,6 +14,7 @@ import string
 import cv2
 import os
 import re
+
 sys.path.append('../')
 from utils import str_filt
 from utils import utils_deblur
@@ -21,11 +22,14 @@ from utils import utils_sisr as sr
 import imgaug.augmenters as iaa
 from scipy import io as sio
 from setup import CharsetMapper
-from scipy.cluster.vq import kmeans,vq
+from scipy.cluster.vq import kmeans, vq
 from torchvision import transforms
+
 scale = 0.90
 kernel = utils_deblur.fspecial('gaussian', 15, 1.)
 noise_level_img = 0.
+
+
 class Lable2Tensor:
     def __init__(self):
         self.english_alphabet = '-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -62,18 +66,17 @@ class Lable2Tensor:
         return label_id, length_tensor, input_tensor, text_gt
 
 
-
 def rand_crop(im):
     w, h = im.size
-    p1 = (random.uniform(0, w*(1-scale)), random.uniform(0, h*(1-scale)))
-    p2 = (p1[0] + scale*w, p1[1] + scale*h)
+    p1 = (random.uniform(0, w * (1 - scale)), random.uniform(0, h * (1 - scale)))
+    p2 = (p1[0] + scale * w, p1[1] + scale * h)
     return im.crop(p1 + p2)
 
 
 def central_crop(im):
     w, h = im.size
-    p1 = (((1-scale)*w/2), (1-scale)*h/2)
-    p2 = ((1+scale)*w/2, (1+scale)*h/2)
+    p1 = (((1 - scale) * w / 2), (1 - scale) * h / 2)
+    p2 = ((1 + scale) * w / 2, (1 + scale) * h / 2)
     return im.crop(p1 + p2)
 
 
@@ -84,7 +87,6 @@ def buf2PIL(txn, key, type='RGB'):
     buf.seek(0)
     im = Image.open(buf).convert(type)
     return im
-
 
 
 class lmdbDataset(Dataset):
@@ -132,7 +134,7 @@ class lmdbDataset(Dataset):
 def add_shot_gauss_noise(rgb, shot_noise_mean, read_noise):
     noise_var_map = shot_noise_mean * rgb + read_noise
     noise_dev_map = np.sqrt(noise_var_map)
-    noise = np.random.normal(loc=0.0, scale = noise_dev_map, size=None)
+    noise = np.random.normal(loc=0.0, scale=noise_dev_map, size=None)
     if (rgb.mean() > 252.0):
         noise_rgb = rgb
     else:
@@ -141,14 +143,12 @@ def add_shot_gauss_noise(rgb, shot_noise_mean, read_noise):
     return noise_rgb
 
 
-
 def gauss_unsharp_mask(rgb, shp_kernel, shp_sigma, shp_gain):
     LF = cv2.GaussianBlur(rgb, (shp_kernel, shp_kernel), shp_sigma)
     HF = rgb - LF
     RGB_peak = rgb + HF * shp_gain
     RGB_noise_NR_shp = np.clip(RGB_peak, 0.0, 255.0)
     return RGB_noise_NR_shp, LF
-
 
 
 def degradation(src_img):
@@ -201,33 +201,32 @@ def degradation(src_img):
     return Image.fromarray(RGB_noise_NR_shp.astype(np.uint8))
 
 
-def noisy(noise_typ,image):
-
+def noisy(noise_typ, image):
     if noise_typ == "gauss":
-        row,col,ch= image.shape
+        row, col, ch = image.shape
         mean = 0
         var = 50
-        sigma = var**0.5
-        gauss = np.random.normal(mean,sigma,(row,col,ch))
-        gauss = gauss.reshape(row,col,ch)
+        sigma = var ** 0.5
+        gauss = np.random.normal(mean, sigma, (row, col, ch))
+        gauss = gauss.reshape(row, col, ch)
         # print("gauss:", np.unique(gauss))
         noisy = image + gauss
         return noisy
     elif noise_typ == "s&p":
-        row,col,ch = image.shape
+        row, col, ch = image.shape
         s_vs_p = 0.5
         amount = 0.004
         out = np.copy(image)
         # Salt mode
         num_salt = np.ceil(amount * image.size * s_vs_p)
         coords = [np.random.randint(0, i - 1, int(num_salt))
-              for i in image.shape]
+                  for i in image.shape]
         out[coords] = 1
 
         # Pepper mode
-        num_pepper = np.ceil(amount* image.size * (1. - s_vs_p))
+        num_pepper = np.ceil(amount * image.size * (1. - s_vs_p))
         coords = [np.random.randint(0, i - 1, int(num_pepper))
-              for i in image.shape]
+                  for i in image.shape]
         out[coords] = 0
         return out
 
@@ -268,6 +267,7 @@ def apply_brightness_contrast(input_img, brightness=0, contrast=0):
 
     return buf
 
+
 def JPEG_compress(image):
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
     result, encimg = cv2.imencode('.jpg', image, encode_param)
@@ -277,14 +277,14 @@ def JPEG_compress(image):
 
 class lmdbDataset_real(Dataset):
     def __init__(
-                 self, root=None,
-                 voc_type='upper',
-                 max_len=100,
-                 test=False,
-                 cutblur=False,
-                 manmade_degrade=False,
-                 rotate=None
-                 ):
+            self, root=None,
+            voc_type='upper',
+            max_len=100,
+            test=False,
+            cutblur=False,
+            manmade_degrade=False,
+            rotate=None
+    ):
         super(lmdbDataset_real, self).__init__()
         self.env = lmdb.open(
             root,
@@ -326,9 +326,8 @@ class lmdbDataset_real(Dataset):
             image = cv2.warpAffine(image, M, (w, h))
             # back to PIL image
             image = Image.fromarray(image)
-            
-        return image
 
+        return image
 
     def cutblur(self, img_hr, img_lr):
         p = random.random()
@@ -352,7 +351,7 @@ class lmdbDataset_real(Dataset):
         index += 1
         txn = self.env.begin(write=False)
         label_key = b'label-%09d' % index
-        word = ""# str(txn.get(label_key).decode())
+        word = ""  # str(txn.get(label_key).decode())
         # print("in dataset....")
         img_HR_key = b'image_hr-%09d' % index  # 128*32
         img_lr_key = b'image_lr-%09d' % index  # 64*16
@@ -371,7 +370,7 @@ class lmdbDataset_real(Dataset):
                 if not self.test:
                     angle = random.random() * self.rotate * 2 - self.rotate
                 else:
-                    angle = 0 #self.rotate
+                    angle = 0  # self.rotate
 
                 # img_HR = self.rotate_img(img_HR, angle)
                 # img_lr = self.rotate_img(img_lr, angle)
@@ -429,7 +428,7 @@ class lmdbDataset_realIC15(Dataset):
         assert index <= len(self), 'index range error'
         index += 1
 
-        index = index % (self.nSamples+1)
+        index = index % (self.nSamples + 1)
 
         # print(self.nSamples, index)
 
@@ -457,6 +456,7 @@ class lmdbDataset_realIC15(Dataset):
         label_str = str_filt(word, self.voc_type)
         return img_HR, img_lr, img_HR, img_lr, label_str
 
+
 class resizeNormalize(object):
     def __init__(self, size, mask=False, interpolation=Image.BICUBIC, aug=None, blur=False):
         self.size = size
@@ -476,7 +476,7 @@ class resizeNormalize(object):
             ratio = float(ori_width) / ori_height
 
             if ratio < 3:
-                width = 100# if self.size[0] == 32 else 50
+                width = 100  # if self.size[0] == 32 else 50
             else:
                 width = int(ratio * self.size[1])
 
@@ -488,7 +488,7 @@ class resizeNormalize(object):
         if self.blur:
             # img_np = np.array(img)
             # img_np = cv2.GaussianBlur(img_np, (5, 5), 1)
-            #print("in degrade:", np.unique(img_np))
+            # print("in degrade:", np.unique(img_np))
             # img_np = noisy("gauss", img_np).astype(np.uint8)
             # img_np = apply_brightness_contrast(img_np, 40, 40).astype(np.uint8)
             # img_np = JPEG_compress(img_np)
@@ -532,11 +532,10 @@ class NormalizeOnly(object):
             ratio = float(ori_width) / ori_height
 
             if ratio < 3:
-                width = 100# if self.size[0] == 32 else 50
+                width = 100  # if self.size[0] == 32 else 50
             else:
                 width = int(ratio * self.size[1])
             size = (width, self.size[1])
-
 
         if self.blur:
             img_np = np.array(img)
@@ -557,7 +556,6 @@ class NormalizeOnly(object):
             img_tensor = torch.cat((img_tensor, mask), 0)
 
         return img_tensor
-
 
 
 class resizeNormalizeRandomCrop(object):
@@ -593,8 +591,6 @@ class resizeNormalizeRandomCrop(object):
         return img_tensor
 
 
-
-
 class randomSequentialSampler(sampler.Sampler):
 
     def __init__(self, data_source, batch_size):
@@ -619,7 +615,6 @@ class randomSequentialSampler(sampler.Sampler):
 
     def __len__(self):
         return self.num_samples
-
 
 
 class alignCollate_syn(object):
@@ -658,7 +653,7 @@ class alignCollate_syn(object):
         self.down_sample_scale = down_sample_scale
         self.mask = mask
         # self.alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-        self.alphabet = open("al_chinese.txt", "r",encoding='UTF-8').readlines()[0].replace("\n", "")
+        self.alphabet = open("al_chinese.txt", "r", encoding='UTF-8').readlines()[0].replace("\n", "")
         self.d2a = "-" + self.alphabet
         self.alsize = len(self.d2a)
         self.a2d = {}
@@ -671,8 +666,10 @@ class alignCollate_syn(object):
         imgW = self.imgW
 
         self.transform = resizeNormalize((imgW, imgH), self.mask)
-        self.transform2 = resizeNormalize((imgW // self.down_sample_scale, imgH // self.down_sample_scale), self.mask, blur=True)
-        self.transform_pseudoLR = resizeNormalize((imgW // self.down_sample_scale, imgH // self.down_sample_scale), self.mask, aug=self.aug)
+        self.transform2 = resizeNormalize((imgW // self.down_sample_scale, imgH // self.down_sample_scale), self.mask,
+                                          blur=True)
+        self.transform_pseudoLR = resizeNormalize((imgW // self.down_sample_scale, imgH // self.down_sample_scale),
+                                                  self.mask, aug=self.aug)
 
         self.train = train
 
@@ -696,8 +693,8 @@ class alignCollate_syn(object):
 
         if self.train:
             images_lr = [image.resize(
-            (image.size[0] // 2, image.size[1] // 2), # self.down_sample_scale
-            Image.BICUBIC) for image in images_lr]
+                (image.size[0] // 2, image.size[1] // 2),  # self.down_sample_scale
+                Image.BICUBIC) for image in images_lr]
         else:
             pass
         #    # for image in images_lr:
@@ -761,8 +758,8 @@ class alignCollate_syn(object):
 
         # print(images_lr.shape, images_hr.shape)
 
-        return images_hr, images_lr, images_hr, images_lr, label_strs, label_rebatches, torch.tensor(weighted_masks).long(), torch.tensor(weighted_tics)
-
+        return images_hr, images_lr, images_hr, images_lr, label_strs, label_rebatches, torch.tensor(
+            weighted_masks).long(), torch.tensor(weighted_tics)
 
 
 class alignCollate_real(alignCollate_syn):
@@ -800,7 +797,6 @@ class alignCollate_real(alignCollate_syn):
 
 
 class alignCollate_realWTL(alignCollate_syn):
-
 
     def get_mask(self, img_tensor):
         img_tensor = img_tensor.unsqueeze(0)
@@ -864,7 +860,7 @@ class alignCollate_realWTL(alignCollate_syn):
                 padding = int(inter_com / (len(word) - 1))
                 new_word = word[0]
                 for i in range(len(word) - 1):
-                   new_word += "-" * padding + word[i+1]
+                    new_word += "-" * padding + word[i + 1]
 
                 word = new_word
                 pass
@@ -977,7 +973,7 @@ class alignCollate_realWTLAMask(alignCollate_syn):
                 padding = int(inter_com / (len(word) - 1))
                 new_word = word[0]
                 for i in range(len(word) - 1):
-                    new_word += "-" * padding + word[i+1]
+                    new_word += "-" * padding + word[i + 1]
 
                 word = new_word
                 pass
@@ -989,7 +985,7 @@ class alignCollate_realWTLAMask(alignCollate_syn):
             #########################################
             # random.shuffle(label_list)
             #########################################
-            
+
             # if len(label_list) <= 0:
             #     # blank label
             #     weighted_masks.append(0)
@@ -1022,7 +1018,8 @@ class alignCollate_realWTLAMask(alignCollate_syn):
 
         label_rebatches = label_rebatches.unsqueeze(1).float().permute(0, 3, 1, 2)
 
-        return images_HR, images_pseudoLR, images_lr, images_HRy, images_lry, label_strs, label_rebatches, weighted_masks.clone().detach(), torch.tensor(weighted_tics)
+        return images_HR, images_pseudoLR, images_lr, images_HRy, images_lry, label_strs, label_rebatches, weighted_masks.clone().detach(), torch.tensor(
+            weighted_tics)
 
 
 class ConcatDataset(Dataset):
