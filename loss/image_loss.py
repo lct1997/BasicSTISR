@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-
 import pickle as pkl
 alphabet = '-0123456789abcdefghijklmnopqrstuvwxyz'
 standard_alphebet = '-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -16,12 +15,53 @@ class ImageLoss(nn.Module):
         self.mse = nn.MSELoss(reduce=False)
         self.GPLoss = GradientPriorLoss()
         self.loss_weight = loss_weight
-
+        self.MaskLoss = MaskLoss()
     def forward(self, out_images, target_images):
         mse_loss = self.mse(out_images, target_images).mean(1).mean(1).mean(1)
         gp_loss = self.GPLoss(out_images[:, :3, :, :], target_images[:, :3, :, :])
         loss = self.loss_weight[0] * mse_loss + self.loss_weight[1] * gp_loss
         return loss
+
+from torchvision import transforms
+from scipy.cluster.vq import vq,kmeans
+class MaskLoss(nn.Module):
+    def __init__(self):
+        super(MaskLoss, self).__init__()
+        self.l1_loss = nn.L1Loss()
+        self.mse_loss = nn.MSELoss()
+
+    def forward(self, hr_img, sr_mask):
+        hr_mask = self.get_mask(hr_img)
+        if hr_img.size(2)!=sr_mask.size(2):
+            hr_mask = F.interpolate(hr_mask, size=(hr_img.shape[2]//2, hr_img.shape[3]//2), mode='bicubic', align_corners=True)
+        mask_loss = self.mse_loss(sr_mask, hr_mask)
+        return mask_loss
+
+    @staticmethod
+    def get_mask(img_tensor):
+        b, c, h, w = img_tensor.shape
+        img = img_tensor.mean(dim=1)
+        toTensor = transforms.ToTensor()
+        masks = torch.zeros(img.size()).to(img.device)  # 空的[B,16,64,64]
+        for i in range(b):
+            img_batch = img[i].reshape(-1).cpu()
+            # 聚类， k=2是聚类数目
+            centroids, variance = kmeans(img_batch.detach(), 2)
+            code, distance = vq(img_batch.detach(), centroids)
+            code = code.reshape(h, w)
+            fc = sum(code[:, 0])
+            lc = sum(code[:, -1])
+            fr = sum(code[0, :])
+            lr = sum(code[-1, :])
+            num = int(fr > w // 2) + int(lr > w // 2) + int(fc > h // 2) + int(lc > h // 2)
+            if num >= 3:
+                mask = 1 - code
+            else:
+                mask = code
+            mask = toTensor(mask).contiguous().to(img_tensor.device)
+            masks[i:i + 1, :, :] = mask
+        return masks.unsqueeze(1)
+
 
 class GradientPriorLoss(nn.Module):
     def __init__(self, ):

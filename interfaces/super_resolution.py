@@ -51,7 +51,7 @@ class TextSR(base.TextBase):
         images_sr = []
         before = time.time()
         if text_emb is not None:  # ["tatt", "tbsrn", "tpgsr"]有文本先验和mask
-            output = model_list[0](images_lr, text_emb.detach())
+            output,_ = model_list[0](images_lr, text_emb.detach())
         elif self.args.arch in ["tg"]: # 没有mask
             output = model_list[0](images_lr[:,:3,:,:])
         else:
@@ -59,7 +59,7 @@ class TextSR(base.TextBase):
         after = time.time()
         # print("fps:", (after - before))
         ret_dict["duration"] += (after - before)
-        if type(output)==list:
+        if type(output) == list:
             images_sr.append(output[0])
         else:
             images_sr.append(output)
@@ -84,7 +84,7 @@ class TextSR(base.TextBase):
             for file in glob.glob(tensorboard_dir + "/*"):
                 os.remove(file)
         self.results_recorder = SummaryWriter(tensorboard_dir)
-        # ------- init text recognizer for eval here --------
+        # ------- init text recognizer for eval here ----------
         aster, aster_info = self.CRNN_init()
         aster.eval()
 
@@ -183,12 +183,12 @@ class TextSR(base.TextBase):
                     cascade_images = model_list[0](images_lr[:,:3,:,:])
                     loss, mse_loss, attention_loss, recognition_loss = image_crit(cascade_images[:,:3,:,:], images_hr[:,:3,:,:], label_strs)
                 elif self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
-                    cascade_images = model_list[0](cascade_images, label_vecs_final.detach())
+                    cascade_images, pre_mask = model_list[0](cascade_images, label_vecs_final.detach())
                     loss_tp = sem_loss(label_vecs, label_vecs_hr)   # TP损失：LR和HR的识别结果损失
-                    loss = image_crit(cascade_images, images_hr)  # L2损失：SR和HR的图像损失
+                    loss = image_crit(cascade_images, images_hr, pre_mask)  # L2损失：SR和HR的图像损失
                     if self.args.arch == "tatt":
                         """ TPGSR没有这个损失 """
-                        cascade_images_sr_ret = model_list[0](images_lr_ret, label_vecs_final.detach())  # 获得旋转后的SR
+                        cascade_images_sr_ret, _ = model_list[0](images_lr_ret, label_vecs_final.detach())  # 获得旋转后的SR
                         cascade_images_ret = torch_rotate_img(cascade_images_sr_ret, arc, rand_offs)  # 再转回来
                         loss_tsc = (1 - tri_ssim(cascade_images_ret, cascade_images, images_hr).mean()) * 0.1  #TSC损失
                         loss += loss_tsc
@@ -257,9 +257,10 @@ class TextSR(base.TextBase):
                         psnr_dict[data_name]=metrics_dict['psnr_avg']
                         ssim_dict[data_name]=metrics_dict['ssim_avg']
                         """ 验证完成后进行求导 """
-                        for p in aster_student.parameters():
-                            p.requires_grad = True
-                        aster_student.train()
+                        if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
+                            for p in aster_student.parameters():
+                                p.requires_grad = True
+                            aster_student.train()
                         for model in model_list:
                             for p in model.parameters():
                                 p.requires_grad = True
@@ -312,7 +313,10 @@ class TextSR(base.TextBase):
                         logging.info('best ssim {:.4f}'.format(1 * (ssim_dict['easy'] * 1619
                                                                 + ssim_dict['medium'] * 1411
                                                                 + ssim_dict['hard'] * 1343) / (1343 + 1411 + 1619)))
-                        self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, True, converge_list, recognizer=aster_student)
+                        if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
+                            self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, True, converge_list, recognizer=aster_student)
+                        self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, True,
+                                             converge_list, recognizer=None)
                         with open(log_path, "a+", newline="") as out:
                             writer = csv.writer(out)
                             writer.writerow([epoch, "****", "*****", "******", "******", "******", "best_sum",
@@ -322,11 +326,14 @@ class TextSR(base.TextBase):
 
                 if iters % cfg.saveInterval == 0:
                     best_model_info = {'accuracy': best_model_acc, 'psnr': best_model_psnr, 'ssim': best_model_ssim}
-                    self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, False, converge_list, recognizer=aster_student)
+                    if self.args.arch in ["tatt", "tpgsr", "tbsrn"]:
+                        self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, False, converge_list, recognizer=aster_student)
+                    self.save_checkpoint(model_list, epoch, iters, best_history_acc, best_model_info, False,
+                                         converge_list, recognizer=None)
 
             lr_scheduler.step()
 
-    def eval(self, model_list, val_loader, image_crit, index, aster, aster_info, data_name=None):
+    def eval(self, model_list, val_loader, image_crit, index, aster, aster_info, data_name=None, caculate_psnr=False):
         # ------- 验证时，设定参数不求导，可以省内存 ------------------------
         for model in model_list:
             model.eval()
@@ -440,19 +447,15 @@ class TextSR(base.TextBase):
                     sim_preds = self.converter_moran.decode(preds.data, aster_dict_sr[1].data)
                     predict_result_sr_ = [pred.split('$')[0] for pred in sim_preds]
                 predict_result_sr.append(predict_result_sr_)
-
                 img_lr = torch.nn.functional.interpolate(images_lr, images_hr.shape[-2:], mode="bicubic")
                 img_sr = torch.nn.functional.interpolate(images_sr[-1], images_hr.shape[-2:], mode="bicubic")
-
                 metric_dict['psnr'].append(self.cal_psnr(img_sr[:, :3], images_hr[:, :3]))
                 metric_dict['ssim'].append(self.cal_ssim(img_sr[:, :3], images_hr[:, :3]))
-
                 metric_dict["LPIPS_VGG_SR"].append(lpips_vgg(img_sr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
-
-                metric_dict['psnr_lr'].append(self.cal_psnr(img_lr[:, :3], images_hr[:, :3]))
-                metric_dict['ssim_lr'].append(self.cal_ssim(img_lr[:, :3], images_hr[:, :3]))
-
-                metric_dict["LPIPS_VGG_LR"].append(lpips_vgg(img_lr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
+                if caculate_psnr:
+                    metric_dict['psnr_lr'].append(self.cal_psnr(img_lr[:, :3], images_hr[:, :3]))
+                    metric_dict['ssim_lr'].append(self.cal_ssim(img_lr[:, :3], images_hr[:, :3]))
+                    metric_dict["LPIPS_VGG_LR"].append(lpips_vgg(img_lr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
 
             else:
                 aster_dict_sr = aster[0]["data_in_fn"](images_sr[:, :3, :, :])
@@ -486,13 +489,11 @@ class TextSR(base.TextBase):
                 img_lr = torch.nn.functional.interpolate(images_lr, images_sr.shape[-2:], mode="bicubic")
                 metric_dict['psnr'].append(self.cal_psnr(images_sr[:, :3], images_hr[:, :3]))
                 metric_dict['ssim'].append(self.cal_ssim(images_sr[:, :3], images_hr[:, :3]))
-
                 metric_dict["LPIPS_VGG_SR"].append(lpips_vgg(images_sr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
-
-                metric_dict['psnr_lr'].append(self.cal_psnr(img_lr[:, :3], images_hr[:, :3]))
-                metric_dict['ssim_lr'].append(self.cal_ssim(img_lr[:, :3], images_hr[:, :3]))
-
-                metric_dict["LPIPS_VGG_LR"].append(lpips_vgg(img_lr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
+                if caculate_psnr:
+                    metric_dict['psnr_lr'].append(self.cal_psnr(img_lr[:, :3], images_hr[:, :3]))
+                    metric_dict['ssim_lr'].append(self.cal_ssim(img_lr[:, :3], images_hr[:, :3]))
+                    metric_dict["LPIPS_VGG_LR"].append(lpips_vgg(img_lr[:, :3].cpu(), images_hr[:, :3].cpu()).data.numpy()[0].reshape(-1)[0])
 
             if self.args.test_model == "CRNN":#之前是只对SR的识别结果进行的处理，这里将HR和LR同样进行处理
                 predict_result_lr = aster[0]["string_process"](aster_output_lr)
@@ -538,29 +539,27 @@ class TextSR(base.TextBase):
                                   predict_result_sr[0], label_strs)
             sum_images += val_batch_size
             torch.cuda.empty_cache()
-
         # 已经把整个测试集跑完
         psnr_avg = sum(metric_dict['psnr']) / (len(metric_dict['psnr']) + 1e-10)
         ssim_avg = sum(metric_dict['ssim']) / (len(metric_dict['psnr']) + 1e-10)
-
-        psnr_avg_lr = sum(metric_dict['psnr_lr']) / (len(metric_dict['psnr_lr']) + 1e-10)
-        ssim_avg_lr = sum(metric_dict['ssim_lr']) / (len(metric_dict['ssim_lr']) + 1e-10)
-        lpips_vgg_lr = sum(metric_dict["LPIPS_VGG_LR"]) / (len(metric_dict['LPIPS_VGG_LR']) + 1e-10)
         lpips_vgg_sr = sum(metric_dict["LPIPS_VGG_SR"]) / (len(metric_dict['LPIPS_VGG_SR']) + 1e-10)
+        if caculate_psnr:
+            psnr_avg_lr = sum(metric_dict['psnr_lr']) / (len(metric_dict['psnr_lr']) + 1e-10)
+            ssim_avg_lr = sum(metric_dict['ssim_lr']) / (len(metric_dict['ssim_lr']) + 1e-10)
+            lpips_vgg_lr = sum(metric_dict["LPIPS_VGG_LR"]) / (len(metric_dict['LPIPS_VGG_LR']) + 1e-10)
 
         logging.info('[{}]\t'
-              'loss_rec {:.3f}| loss_im {:.3f}\t'
-              'PSNR {:.2f} | SSIM {:.4f}\t'
-              'LPIPS {:.4f}\t'
-              .format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                      0, 0,
-                      float(psnr_avg), float(ssim_avg), float(lpips_vgg_sr)))
+                     'PSNR_SR {:.2f} | SSIM_SR {:.4f}\t'
+                     'LPIPS_SR {:.4f}\t'
+                     .format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                             float(psnr_avg), float(ssim_avg), float(lpips_vgg_sr)))
+        if caculate_psnr:
 
-        logging.info('[{}]\t'
-              'PSNR_LR {:.2f} | SSIM_LR {:.4f}\t'
-              'LPIPS_LR {:.4f}\t'
-              .format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                      float(psnr_avg_lr), float(ssim_avg_lr), float(lpips_vgg_lr)))
+            logging.info('[{}]\t'
+                  'PSNR_LR {:.2f} | SSIM_LR {:.4f}\t'
+                  'LPIPS_LR {:.4f}\t'
+                  .format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                          float(psnr_avg_lr), float(ssim_avg_lr), float(lpips_vgg_lr)))
 
         # logging.info('save display images')
         if self.args.display:
@@ -568,7 +567,6 @@ class TextSR(base.TextBase):
             self.tripple_display(images_lr[:, :3, :], images_sr[0][:, :3, :], images_hr[:, :3, :],
                                  predict_result_lr, predict_result_sr[0], label_strs)
         accuracy = round(counters[0] / sum_images, 4)# loader已经跑完了，把全部的测试集图片和全部正确个数相除
-
         accuracy_lr = round(n_correct_lr / sum_images, 4)
         accuracy_hr = round(n_correct_hr / sum_images, 4)
         psnr_avg = round(psnr_avg.item(), 6)
@@ -576,8 +574,6 @@ class TextSR(base.TextBase):
 
 
         logging.info('sr_accuray_iter' + ': %.2f%%' % (accuracy * 100))
-
-
         logging.info('lr_accuray: %.2f%%' % (accuracy_lr * 100))
         logging.info('hr_accuray: %.2f%%' % (accuracy_hr * 100))
         metric_dict['accuracy'] = accuracy
@@ -656,7 +652,8 @@ class TextSR(base.TextBase):
                     0,
                     [test_bible[self.args.test_model], aster_student, aster],
                     aster_info,
-                    data_name
+                    data_name,
+                    caculate_psnr=True
                 )
             else:
                 metrics_dict = self.eval(
@@ -666,7 +663,8 @@ class TextSR(base.TextBase):
                     0,
                     [test_bible[self.args.test_model], None, None],
                     aster_info,
-                    data_name
+                    data_name,
+                    caculate_psnr=True
                 )
             acc = float(metrics_dict['accuracy'])
             total_acc[data_name]=acc

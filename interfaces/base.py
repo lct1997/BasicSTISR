@@ -120,7 +120,7 @@ class TextBase(object):
         cfg = self.config.TRAIN
         resume = self.resume
 
-        # ----------------------- 定义模型和损失 -------------------------
+        # ----------------------- 定义模型和损失 ---------------------------
         if self.args.arch == 'srcnn':
             model = srcnn.SRCNN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height,
                                 STN=self.args.STN, mask=self.mask)
